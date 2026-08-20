@@ -44,10 +44,11 @@ jobs:
         run: |
           PKG=$(node -p "require('./package.json').version")
           npm pack
+          cp onebox-dsh-bridge-"$PKG".tgz onebox-dsh-bridge.tgz
           gh release create "$GITHUB_REF_NAME" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            onebox-dsh-bridge-"$PKG".tgz || \
-          gh release upload "$GITHUB_REF_NAME" onebox-dsh-bridge-"$PKG".tgz --clobber
+            onebox-dsh-bridge-"$PKG".tgz onebox-dsh-bridge.tgz || \
+          gh release upload "$GITHUB_REF_NAME" onebox-dsh-bridge-"$PKG".tgz onebox-dsh-bridge.tgz --clobber
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
