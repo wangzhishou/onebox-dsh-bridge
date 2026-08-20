@@ -42,6 +42,8 @@ pnpm dsh plugin --profile web add onebox-dsh-bridge
 
 The package declares `dsh.bundle`, so `add` automatically merges the plugin row into the profile's composition layer. Restart `dsh web` to take effect.
 
+**Compatibility**: verified against dsh `0.1.0-rc.7` (npm `latest`) and `0.1.0-rc.8` (npm `next`) — pairing page, status API and QR pair-session creation all pass on both. The plugin must live in the `web` profile (it injects the `webServer` service that only the web composition provides).
+
 Installing straight from GitHub also works:
 
 ```sh

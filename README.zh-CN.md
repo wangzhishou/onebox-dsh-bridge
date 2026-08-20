@@ -42,6 +42,8 @@ pnpm dsh plugin --profile web add onebox-dsh-bridge
 
 包声明了 `dsh.bundle`,`add` 会自动把插件行并入 profile 的组合层。重启 `dsh web` 生效。
 
+**兼容性**:已在 dsh `0.1.0-rc.7`(npm `latest`)与 `0.1.0-rc.8`(npm `next`)上验证——配对页、状态 API、二维码配对会话创建均通过。插件必须装在 `web` profile(它注入的 `webServer` 服务只有 web 组合提供)。
+
 也可以直接从 GitHub 安装:
 
 ```sh
