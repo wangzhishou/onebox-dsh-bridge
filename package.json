@@ -17,6 +17,20 @@
       "patch": "./cordis.patch.yml"
     }
   },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "deepseek",
+    "agent",
+    "onebox"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wangzhishou/onebox-dsh-bridge.git"
+  },
+  "homepage": "https://github.com/wangzhishou/onebox-dsh-bridge#readme",
+  "bugs": "https://github.com/wangzhishou/onebox-dsh-bridge/issues",
   "license": "MIT",
   "files": [
     "index.js",
