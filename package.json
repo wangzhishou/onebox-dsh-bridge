@@ -1,0 +1,27 @@
+{
+  "name": "onebox-dsh-bridge",
+  "version": "0.1.0",
+  "description": "万宝盒云端中继桥:让本机 dsh 经 api.wanbaohe.com 被万宝盒 App 公网访问(扫码配对 + 隧道帧多路复用)",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "qrcode": "^1.5.4",
+    "ws": "^8.18.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "license": "MIT",
+  "files": [
+    "index.js",
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ]
+}

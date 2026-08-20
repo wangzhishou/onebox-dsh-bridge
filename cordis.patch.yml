@@ -1,0 +1,5 @@
+# onebox-dsh-bridge 组合包层:随 dsh plugin --profile web add 自动并入 profile。
+# config 全部可省(默认值见 README);要改就在 profile 的 cordis.patch.yml 覆盖整行。
+- insert:
+    - id: onebox-dsh-bridge
+      name: 'onebox-dsh-bridge'
