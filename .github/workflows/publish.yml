@@ -1,0 +1,46 @@
+# tag 推送(v*)自动发布到 npm。
+# 前置:仓库 Settings → Secrets and variables → Actions 添加 NPM_TOKEN
+# (npmjs.com → Access Tokens → Granular Access Token,Read and write + Bypass 2FA)。
+name: publish
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  npm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Check version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PKG=$(node -p "require('./package.json').version")
+          if [ "$TAG" != "$PKG" ]; then
+            echo "::error::tag $TAG != package.json version $PKG"
+            exit 1
+          fi
+
+      - name: Publish to npm
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      - name: Attach tarball to GitHub Release
+        run: |
+          PKG=$(node -p "require('./package.json').version")
+          npm pack
+          gh release create "$GITHUB_REF_NAME" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            onebox-dsh-bridge-"$PKG".tgz || \
+          gh release upload "$GITHUB_REF_NAME" onebox-dsh-bridge-"$PKG".tgz --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
