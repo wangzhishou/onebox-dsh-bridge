@@ -41,6 +41,12 @@ pnpm dsh plugin --profile web add /path/to/onebox-dsh-bridge
 
 页面按钮:**重新生成二维码**(旧会话作废,建新配对会话;二维码有效期 10 分钟,过期也会自动重建)、**解除绑定并重新配对**(删除本地 token,回到待扫码)。
 
+## 截图
+
+| 插件配对页 | App 连接页 | App 聊天指挥 | 消息反馈与统计 |
+|---|---|---|---|
+| ![配对页](docs/images/pairing-page.png) | ![连接页](docs/images/app-connect.png) | ![聊天](docs/images/app-chat.png) | ![反馈行](docs/images/app-feedback.png) |
+
 ## 配置项
 
 全部可省。优先级:环境变量 > 插件 config > 默认值。
