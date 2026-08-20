@@ -1,7 +1,7 @@
 {
   "name": "onebox-dsh-bridge",
-  "version": "0.1.0",
-  "description": "万宝盒云端中继桥:让本机 dsh 经 api.wanbaohe.com 被万宝盒 App 公网访问(扫码配对 + 隧道帧多路复用)",
+  "version": "0.1.1",
+  "description": "DeepSeek Harness plugin: bridge local dsh web to the OneBox Android app over the public internet (scan-to-pair, E2E encrypted tunnel). 万宝盒 App 的 DSH 云端中继桥插件。",
   "type": "module",
   "main": "index.js",
   "exports": {
