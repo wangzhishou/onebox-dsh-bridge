@@ -29,7 +29,12 @@ jobs:
           fi
 
       - name: Publish to npm
-        run: npm publish --access public
+        run: |
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::notice::NPM_TOKEN secret 未配置,跳过 npm publish(仅产出 Release tarball)"
+            exit 0
+          fi
+          npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
