@@ -42,7 +42,29 @@ pnpm dsh plugin --profile web add onebox-dsh-bridge
 
 包声明了 `dsh.bundle`,`add` 会自动把插件行并入 profile 的组合层。重启 `dsh web` 生效。
 
-**兼容性**:已在 dsh `0.1.0-rc.7`(npm `latest`)与 `0.1.0-rc.8`(npm `next`)上验证——配对页、状态 API、二维码配对会话创建均通过。插件必须装在 `web` profile(它注入的 `webServer` 服务只有 web 组合提供)。
+**兼容性**:桥插件本身与协议无关——HTTP 只转发 `/api/<method>`、WS 只透传帧,不硬编码任何 DSH 端点名。已在 dsh `0.1.5-rc.2`(npm `next`)上验证:配对页、状态 API、二维码配对会话创建,以及隧道 `/api/remote.mux` WebSocket 全部通过。更老的版本(`0.1.0-rc.7` / `0.1.0-rc.8`,用 `/api/events.mux` 与 `/api/events.host`)隧道依然可用,但**万宝盒 App 需要 dsh `0.1.2` 或更新**——详见 OneBox DSH 客户端里的兼容性提示。插件必须装在 `web` profile(它注入的 `webServer` 服务只有 web 组合提供)。
+
+
+### dsh 0.1.5 与浏览器鉴权
+
+从 dsh `0.1.5` 起,`/api` 的**每一个**请求(含 `/api/remote.mux` 的 WebSocket 升级)都要过 connection 的
+Host 围栏**加浏览器鉴权**:loopback 不豁免、`Authorization: Bearer` 不被识别、`--trusted-host` 只放宽
+Host 围栏(403)不解决鉴权(401)。因此插件会用 `ctx.connection.authenticatedUrl` 换取本机会话 cookie
+(`lib/session-cookie.js`),给所有隧道 HTTP 与 WS 升级带上,并在 401 时重换一次重试。
+
+### 本地联调测试(局域网直连,不需要中继)
+
+不想部署中继就想拿手机试:用仓库里的 LAN 反代,它注入同样的会话 cookie 并改写 `Host`,
+于是 App 的「直连」模式在同一局域网里就能用:
+
+```sh
+# 1) 起 dsh web,从它打印的 URL 里复制 ?token=…
+# 2) 在本仓库执行:
+node tools/lan-proxy.mjs --token <token> --port 3081
+# 3) App:DSH 客户端 → 直连 → http://<你的局域网 IP>:3081
+```
+
+它会把本机 dsh 的 `/api`(浏览器会话权限)暴露给局域网,只在你信任的网络里临时使用,用完 Ctrl-C 关闭。
 
 也可以直接从 GitHub 安装:
 

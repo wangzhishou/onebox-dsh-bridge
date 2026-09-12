@@ -42,7 +42,31 @@ pnpm dsh plugin --profile web add onebox-dsh-bridge
 
 The package declares `dsh.bundle`, so `add` automatically merges the plugin row into the profile's composition layer. Restart `dsh web` to take effect.
 
-**Compatibility**: verified against dsh `0.1.0-rc.7` (npm `latest`) and `0.1.0-rc.8` (npm `next`) — pairing page, status API and QR pair-session creation all pass on both. The plugin must live in the `web` profile (it injects the `webServer` service that only the web composition provides).
+**Compatibility**: the bridge itself is protocol-agnostic — it forwards `/api/<method>` over HTTP and tunnels WebSocket frames verbatim, so it does not hard-code DSH endpoint names. Verified against dsh `0.1.5-rc.2` (npm `next`) for the pairing page, status API, QR pair-session creation, and the tunnelled `/api/remote.mux` WebSocket. Older releases (`0.1.0-rc.7` / `0.1.0-rc.8`, which used `/api/events.mux` and `/api/events.host`) still tunnel fine, but the **app** requires dsh `0.1.2` or newer — see the compatibility note in the OneBox DSH client. The plugin must live in the `web` profile (it injects the `webServer` service that only the web composition provides).
+
+
+### dsh 0.1.5 and browser authentication
+
+Since dsh `0.1.5` every `/api` request — including the `/api/remote.mux` WebSocket upgrade — goes through the
+connection browser-trust fence **and browser authentication**: loopback is not exempt, `Authorization: Bearer` is
+not recognised, and `--trusted-host` only widens the Host fence (403), not the auth one (401). The plugin therefore
+mints the local session cookie through `ctx.connection.authenticatedUrl` (`lib/session-cookie.js`), attaches it to
+every tunneled HTTP call and WS upgrade, and re-mints once on 401.
+
+### Local integration testing (LAN, no relay needed)
+
+To try the Android app against your machine without deploying the relay, run the LAN proxy — it injects the same
+session cookie and rewrites `Host`, so the app's "direct connect" mode works on a phone in the same LAN:
+
+```sh
+# 1) start dsh web and copy the ?token=… from the URL it prints
+# 2) from this repo:
+node tools/lan-proxy.mjs --token <token> --port 3081
+# 3) in the app: DSH Client → direct connect → http://<your-LAN-IP>:3081
+```
+
+It exposes your local dsh `/api` (browser-session privileges) to the LAN, so use it only on a network you trust
+and stop it (Ctrl-C) when done.
 
 Installing straight from GitHub also works:
 

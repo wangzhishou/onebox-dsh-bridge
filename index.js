@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import QRCode from 'qrcode'
 import { createCipher } from './lib/e2e.js'
+import { createSessionCookie } from './lib/session-cookie.js'
 import { Tunnel } from './lib/tunnel.js'
 import { renderPage } from './lib/page.js'
 
@@ -47,6 +48,21 @@ export function apply(ctx, config = {}) {
   /** @type {Tunnel | null} 当前控制隧道,解绑时主动关闭。 */
   let currentTunnel = null
   const timers = new Set()
+
+  /**
+   * 本机 dsh 的浏览器会话 cookie(0.1.5 起 /api 必需,loopback 也一样)。
+   * connection 服务可能晚于本插件装载,所以用原地注入:拿到之前隧道按无 cookie 走,
+   * 拿到之后所有请求自动带上;旧版 dsh 不需要 cookie,拿不到也不影响。
+   */
+  let sessionCookie = null
+  ctx.inject(['connection'], (connectionCtx) => {
+    sessionCookie = createSessionCookie({
+      connection: connectionCtx.connection,
+      upstream,
+      log: (msg) => warn(msg),
+    })
+    log('已接入 connection:隧道请求将携带 dsh web 会话 cookie')
+  })
 
   // ---------- 凭据持久化 ----------
 
@@ -179,6 +195,7 @@ export function apply(ctx, config = {}) {
         url,
         upstream,
         cipher,
+        cookieProvider: () => sessionCookie,
         log,
         onOpen: () => {
           state.phase = 'online'
@@ -249,6 +266,8 @@ export function apply(ctx, config = {}) {
         gateway,
         upstream,
         e2e: state.e2e, // 当前凭据是否携带 E2E 密钥
+        // dsh 0.1.5 起隧道请求要带本机会话 cookie;false 说明 connection 服务还没接入
+        authCookie: sessionCookie !== null,
       })
       return
     }

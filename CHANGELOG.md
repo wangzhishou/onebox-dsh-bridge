@@ -3,6 +3,20 @@
 All notable changes to onebox-dsh-bridge are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/), versioning follows [SemVer](https://semver.org/).
 
+## [0.1.3] - 2026-09-12
+
+### Fixed
+
+- **dsh 0.1.5 起隧道请求全部 401**:该版本对 `/api` 的每个请求(含 `/api/remote.mux` 的 WS 升级)
+  都强制浏览器鉴权,loopback 也不例外、`Authorization: Bearer` 不被识别。插件现在会
+  用 `ctx.connection.authenticatedUrl` 换取本机会话 cookie 并缓存,HTTP 与 WS 升级都带上;
+  401 时丢弃缓存重换一次重试(`lib/session-cookie.js`)
+
+### Added
+
+- `tools/lan-proxy.mjs`:局域网联调反代(注入会话 cookie,把本机 dsh 的 `/api` 暴露给手机直连,
+  绕开 cookie 门槛),用法见 README「联调测试」
+
 ## [0.1.2] - 2026-08-20
 
 ### Changed
