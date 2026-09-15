@@ -13,7 +13,7 @@
 ## 工作原理
 
 ```
-万宝盒 App ⇅ https://api.wanbaohe.com/dsh/*(strapi_go 中继)
+万宝盒 App ⇅ https://api.wanbaohe.com/dsh/*(国内)或 https://api.oneboxable.com/dsh/*(海外)
                     ⇅ 出站 WSS(控制隧道,JSON 帧多路复用)
             onebox-dsh-bridge(本插件)
                     ⇅ loopback
@@ -75,7 +75,7 @@ dsh plugin --profile web add github:wangzhishou/onebox-dsh-bridge
 ## 使用
 
 1. 打开 dsh web 的 `http://127.0.0.1:3080/onebox-bridge`(端口按你的部署)
-2. 万宝盒 App 打开「DSH 客户端 → 我的电脑」,扫页面上的二维码
+2. 万宝盒 App 打开「DSH 客户端 → 我的电脑」,**按你的 App 渠道扫对应的二维码**(国内版/海外版各一张)
 3. 页面状态变为「已上线」后,在 App 里选择本设备即可连接
 
 页面按钮:**重新生成二维码**(旧会话作废,建新配对会话;二维码有效期 10 分钟,过期也会自动重建)、**解除绑定并重新配对**(删除本地 token,回到待扫码)。
@@ -100,10 +100,11 @@ dsh plugin --profile web add github:wangzhishou/onebox-dsh-bridge
 
 | 项 | 环境变量 | 默认 | 说明 |
 |---|---|---|---|
-| `gateway` | `ONEBOX_DSH_GATEWAY` | `https://api.wanbaohe.com` | 万宝盒网关地址。**海外版 App(Google Play 渠道,走 api.oneboxable.com)必须改成 `https://api.oneboxable.com`**,否则 App 扫码后认领到国内库、登录态对不上 |
+| `gateways` | `ONEBOX_DSH_GATEWAYS`(逗号分隔) | `https://api.wanbaohe.com` + `https://api.oneboxable.com` | 万宝盒网关列表。默认同时对国内、海外两套部署各建配对会话,页面按 App 渠道各出一张二维码,先被扫的生效;App 登录 JWT 只在所属部署有效,双配对免去一切手工配置 |
+| `gateway` | `ONEBOX_DSH_GATEWAY` | — | 单网关覆盖(等价于单元素 `gateways`) |
 | `upstream` | `ONEBOX_DSH_UPSTREAM` | `127.0.0.1:3080` | 本机 dsh 地址(host:port) |
 | `deviceName` | — | 系统 hostname | 配对时上报给 App 的设备名 |
-| `dataDir` | `ONEBOX_DSH_DATA_DIR` | `~/.dsh/profiles/web/onebox-dsh-bridge` | token 存储目录(token.json,0600;网关变更后旧 token 自动作废) |
+| `dataDir` | `ONEBOX_DSH_DATA_DIR` | `~/.dsh/profiles/web/onebox-dsh-bridge` | token 存储目录(token.json,0600;凭据的网关不在配置列表里即自动作废) |
 
 改 config:在 profile 的 `~/.dsh/profiles/web/cordis.patch.yml` 里覆盖整行(patch 替换整个 config 值,需列全所有键):
 
@@ -111,7 +112,9 @@ dsh plugin --profile web add github:wangzhishou/onebox-dsh-bridge
 - id: onebox-dsh-bridge
   name: 'onebox-dsh-bridge'
   config:
-    gateway: https://api.wanbaohe.com
+    gateways:
+      - https://api.wanbaohe.com
+      - https://api.oneboxable.com
     upstream: 127.0.0.1:3080
     deviceName: 我的 Mac
 ```

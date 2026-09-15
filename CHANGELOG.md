@@ -3,6 +3,21 @@
 All notable changes to onebox-dsh-bridge are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/), versioning follows [SemVer](https://semver.org/).
 
+## [0.2.0] - 2026-09-14
+
+### Added
+
+- **双部署同时配对**: 默认同时对国内(api.wanbaohe.com)与海外(api.oneboxable.com)两套网关
+  各建一个配对会话,页面按 App 渠道标注并排展示两张二维码;哪张先被扫码认领,隧道就建到哪边。
+  App 登录 JWT 只在所属部署有效,单网关形态下扫错部署必然 claim 401
+- 配置新增 `gateways` 数组与环境变量 `ONEBOX_DSH_GATEWAYS`(逗号分隔);
+  单值 `gateway` / `ONEBOX_DSH_GATEWAY` 继续支持(等价于单元素数组)
+
+### Changed
+
+- `/onebox-bridge/api/status`: 顶层 `qrSvg`/`payload`/`expiresAt` 移入 `pairs[]` 数组元素
+  (每项含 `gateway`/`kind`/`qrSvg`/`payload`/`expiresAt`/`detail`);顶层 `gateway` 改为当前已连接网关
+
 ## [0.1.3] - 2026-09-12
 
 ### Fixed

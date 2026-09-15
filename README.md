@@ -13,7 +13,7 @@ A [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (dsh) plug
 ## How it works
 
 ```
-OneBox App ⇅ https://api.wanbaohe.com/dsh/* (cloud relay)
+OneBox App ⇅ https://api.wanbaohe.com/dsh/* (CN relay) or https://api.oneboxable.com/dsh/* (international relay)
                  ⇅ outbound WSS (control tunnel, JSON frame multiplexing)
          onebox-dsh-bridge (this plugin)
                  ⇅ loopback
@@ -77,7 +77,7 @@ dsh plugin --profile web add github:wangzhishou/onebox-dsh-bridge
 ## Usage
 
 1. Open `http://127.0.0.1:3080/onebox-bridge` in dsh web (adjust the port to your deployment)
-2. In the OneBox app, open **DSH Client → My Computers** and scan the QR code on the page
+2. In the OneBox app, open **DSH Client → My Computers** and scan the QR code matching your app channel (one per gateway: mainland China / international)
 3. Once the page shows **Online**, pick the device in the app and start chatting with your agent
 
 Page buttons: **Regenerate QR code** (invalidates the old session and creates a new pairing session; codes expire after 10 minutes and are rebuilt automatically) and **Unbind & re-pair** (deletes the local token, back to waiting-for-scan).
@@ -102,10 +102,11 @@ All optional. Priority: environment variable > plugin config > default.
 
 | Key | Env var | Default | Description |
 |---|---|---|---|
-| `gateway` | `ONEBOX_DSH_GATEWAY` | `https://api.wanbaohe.com` | OneBox gateway. **For the international app (Google Play build, api.oneboxable.com) you must set this to `https://api.oneboxable.com`**, otherwise scanned pairings land in the CN database and the login state won't match |
+| `gateways` | `ONEBOX_DSH_GATEWAYS` (comma-separated) | `https://api.wanbaohe.com` + `https://api.oneboxable.com` | OneBox gateways. Both deployments are paired at once by default — the page shows one QR per gateway, labeled by app channel, and the first one scanned wins. The app JWT is only valid on its own deployment, so dual pairing saves users from configuring anything |
+| `gateway` | `ONEBOX_DSH_GATEWAY` | — | Single-gateway override (equivalent to a one-element `gateways` list) |
 | `upstream` | `ONEBOX_DSH_UPSTREAM` | `127.0.0.1:3080` | Local dsh address (host:port) |
 | `deviceName` | — | system hostname | Device name reported to the app during pairing |
-| `dataDir` | `ONEBOX_DSH_DATA_DIR` | `~/.dsh/profiles/web/onebox-dsh-bridge` | Token storage directory (token.json, mode 0600; old tokens are invalidated automatically after a gateway change) |
+| `dataDir` | `ONEBOX_DSH_DATA_DIR` | `~/.dsh/profiles/web/onebox-dsh-bridge` | Token storage directory (token.json, mode 0600; old tokens are invalidated automatically when their gateway leaves the configured list) |
 
 To change config, override the whole row in the profile's `~/.dsh/profiles/web/cordis.patch.yml` (a patch replaces the entire `config` value — list every key):
 
@@ -113,7 +114,9 @@ To change config, override the whole row in the profile's `~/.dsh/profiles/web/c
 - id: onebox-dsh-bridge
   name: 'onebox-dsh-bridge'
   config:
-    gateway: https://api.wanbaohe.com
+    gateways:
+      - https://api.wanbaohe.com
+      - https://api.oneboxable.com
     upstream: 127.0.0.1:3080
     deviceName: My Mac
 ```

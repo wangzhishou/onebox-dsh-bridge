@@ -16,7 +16,9 @@ import { renderPage } from './lib/page.js'
 export const name = 'onebox-dsh-bridge'
 export const inject = ['webServer']
 
-const DEFAULT_GATEWAY = 'https://api.wanbaohe.com'
+// 万宝盒两套部署:国内(VPS)与海外(Cloud Run)。App 的登录 JWT 只在所属部署有效,
+// 所以默认同时对两边各建一个配对会话、各出一张二维码;哪张先被认领,隧道就建到哪边。
+const DEFAULT_GATEWAYS = ['https://api.wanbaohe.com', 'https://api.oneboxable.com']
 const DEFAULT_UPSTREAM = '127.0.0.1:3080'
 const PAIR_POLL_MS = 2_000
 const PAIR_RETRY_MS = 3_000
@@ -25,10 +27,10 @@ const RECONNECT_MAX_MS = 30_000
 
 /**
  * @param {import('@deepseek-ai/cordis').Context} ctx
- * @param {{ gateway?: string, upstream?: string, deviceName?: string, dataDir?: string }} [config]
+ * @param {{ gateway?: string, gateways?: string[], upstream?: string, deviceName?: string, dataDir?: string }} [config]
  */
 export function apply(ctx, config = {}) {
-  const gateway = trimSlash(process.env.ONEBOX_DSH_GATEWAY || config.gateway || DEFAULT_GATEWAY)
+  const gateways = resolveGateways(config)
   const upstream = process.env.ONEBOX_DSH_UPSTREAM || config.upstream || DEFAULT_UPSTREAM
   const deviceName = config.deviceName || os.hostname()
   const dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
@@ -39,11 +41,15 @@ export function apply(ctx, config = {}) {
   const log = (msg) => ctx.logger.info(`[onebox-dsh-bridge] ${msg}`)
   const warn = (msg) => ctx.logger.warn(`[onebox-dsh-bridge] ${msg}`)
 
-  /** 页面轮询用的只读状态。phase: boot|pairing|connecting|online|offline */
-  const state = { phase: 'boot', deviceId: '', qrSvg: '', payload: '', expiresAt: 0, detail: '', e2e: false }
+  /**
+   * 页面轮询用的只读状态。phase: boot|pairing|connecting|online|offline。
+   * pairs 仅 pairing 阶段有内容,每个网关一项:
+   * { gateway, kind, qrSvg, payload, expiresAt, detail }。
+   */
+  const state = { phase: 'boot', deviceId: '', gateway: '', detail: '', e2e: false, pairs: [] }
 
   let stopped = false
-  /** 代次计数:+1 即让配对循环废弃当前会话重新生成(重新生成按钮/410 过期)。 */
+  /** 代次计数:+1 即让所有配对循环废弃当前会话重新生成(重新生成按钮/410 过期/分出胜负)。 */
   let pairGen = 0
   /** @type {Tunnel | null} 当前控制隧道,解绑时主动关闭。 */
   let currentTunnel = null
@@ -69,15 +75,15 @@ export function apply(ctx, config = {}) {
   function loadToken() {
     try {
       const cred = JSON.parse(fs.readFileSync(tokenPath, 'utf8'))
-      // token 与网关绑定;网关变了旧的不可用
-      if (cred.token && cred.gateway === gateway) return cred
+      // token 与网关绑定;凭据的网关不在当前配置里即不可用
+      if (cred.token && gateways.includes(cred.gateway)) return cred
     } catch { /* 不存在或损坏按未配对处理 */ }
     return null
   }
 
   function saveToken(cred) {
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 })
-    fs.writeFileSync(tokenPath, JSON.stringify({ ...cred, gateway }, null, 2), { mode: 0o600 })
+    fs.writeFileSync(tokenPath, JSON.stringify(cred, null, 2), { mode: 0o600 })
   }
 
   function removeToken() {
@@ -86,7 +92,7 @@ export function apply(ctx, config = {}) {
 
   // ---------- 网关配对 API ----------
 
-  async function createPairSession() {
+  async function createPairSession(gateway) {
     const resp = await fetch(`${gateway}/dsh/pair-sessions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -100,7 +106,7 @@ export function apply(ctx, config = {}) {
   }
 
   /** @returns {Promise<{status:string, token?:string, deviceId?:string} | 'gone'>} */
-  async function pollPairStatus(pairingId, secret) {
+  async function pollPairStatus(gateway, pairingId, secret) {
     const resp = await fetch(
       `${gateway}/dsh/pair-sessions/${encodeURIComponent(pairingId)}/status?s=${encodeURIComponent(secret)}`,
       { signal: AbortSignal.timeout(10_000) },
@@ -119,17 +125,51 @@ export function apply(ctx, config = {}) {
     })
   }
 
-  /** 配对:建会话 → 出 QR → 2s 轮询;claimed 落盘返回凭据;410/重新生成 → 重来。 */
+  /** 配对:每个网关各建会话、各出 QR、2s 轮询;先被认领的胜出,落盘返回凭据。 */
   async function pair() {
     while (!stopped) {
       const gen = pairGen
+      state.phase = 'pairing'
+      state.deviceId = ''
+      state.gateway = ''
+      state.detail = ''
+      state.pairs = gateways.map((gateway) => ({
+        gateway, kind: gatewayKind(gateway), qrSvg: '', payload: '', expiresAt: 0, detail: '',
+      }))
+      const cred = await racePairSessions(gen)
+      if (cred) return cred
+      // 全灭:代次被改(重新生成按钮)或正在停止;回到 while 重建全部会话
+    }
+    return null
+  }
+
+  /** 全部网关的配对循环并发开跑;先认领的凭据胜出,代次失效全灭时返回 null。 */
+  function racePairSessions(gen) {
+    return new Promise((resolve) => {
+      let pending = state.pairs.length
+      let winner = null
+      const settle = (cred) => {
+        if (cred && !winner) winner = cred
+        if (--pending === 0) resolve(winner)
+      }
+      for (const entry of state.pairs) {
+        pairGateway(entry, gen).then(settle)
+      }
+    })
+  }
+
+  /** 单网关配对循环:claimed 返回凭据;410/建会话失败就地重建;代次失效或停止返回 null。 */
+  async function pairGateway(entry, gen) {
+    const gateway = entry.gateway
+    while (!stopped && gen === pairGen) {
       let sess
       try {
-        sess = await createPairSession()
+        sess = await createPairSession(gateway)
       } catch (err) {
-        state.phase = 'pairing'
-        state.detail = `网关不可达:${errMsg(err)},${PAIR_RETRY_MS / 1000} 秒后重试`
-        warn(state.detail)
+        entry.qrSvg = ''
+        entry.payload = ''
+        entry.detail = `网关不可达:${errMsg(err)},${PAIR_RETRY_MS / 1000} 秒后重试`
+        warn(`[${gateway}] ${entry.detail}`)
         await sleep(PAIR_RETRY_MS)
         continue
       }
@@ -137,38 +177,36 @@ export function apply(ctx, config = {}) {
       const secret = crypto.randomBytes(32).toString('base64url')
       const e2eKey = crypto.randomBytes(32).toString('base64url')
       const qrText = `oneboxdsh://pair?v=1&g=${gateway}&p=${sess.pairingId}&s=${secret}&k=${e2eKey}`
-      state.phase = 'pairing'
-      state.deviceId = ''
-      state.detail = ''
-      state.expiresAt = Date.now() + (sess.expiresIn || 300) * 1000
-      state.qrSvg = await QRCode.toString(qrText, { type: 'svg', margin: 1 })
-      state.payload = qrText // 原始配对链接(供复制/调试用,仅 loopback 页面可见)
-      log(`配对会话 ${sess.pairingId} 已创建,等待扫码`)
+      entry.qrSvg = await QRCode.toString(qrText, { type: 'svg', margin: 1 })
+      entry.payload = qrText // 原始配对链接(供复制/调试用,仅 loopback 页面可见)
+      entry.expiresAt = Date.now() + (sess.expiresIn || 300) * 1000
+      entry.detail = ''
+      log(`[${gateway}] 配对会话 ${sess.pairingId} 已创建,等待扫码`)
 
       while (!stopped && gen === pairGen) {
         await sleep(PAIR_POLL_MS)
-        if (stopped || gen !== pairGen) break
+        if (stopped || gen !== pairGen) return null
         let result
         try {
-          result = await pollPairStatus(sess.pairingId, secret)
+          result = await pollPairStatus(gateway, sess.pairingId, secret)
         } catch (err) {
-          state.detail = `轮询失败:${errMsg(err)}`
+          entry.detail = `轮询失败:${errMsg(err)}`
           continue // 网络抖动不重建会话,下轮再试
         }
         if (result === 'gone') {
-          log('配对会话已过期,重新生成')
+          log(`[${gateway}] 配对会话已过期,重新生成`)
           break
         }
         if (result.status === 'claimed' && result.token) {
-          const cred = { token: result.token, deviceId: result.deviceId || '', e2eKey }
+          const cred = { token: result.token, deviceId: result.deviceId || '', e2eKey, gateway }
           try {
             saveToken(cred)
           } catch (err) {
             warn(`写入 token 失败:${errMsg(err)}`)
           }
-          log(`配对成功,设备 ${cred.deviceId}`)
-          state.qrSvg = ''
-          state.payload = ''
+          log(`[${gateway}] 配对成功,设备 ${cred.deviceId}`)
+          pairGen++ // 让其它网关的配对循环退出
+          state.pairs = []
           return cred
         }
       }
@@ -181,6 +219,7 @@ export function apply(ctx, config = {}) {
     return new Promise((resolve) => {
       state.phase = 'connecting'
       state.deviceId = cred.deviceId
+      state.gateway = cred.gateway
       // 旧凭据(无 e2eKey)= 明文隧道;key 损坏按明文降级,不阻断连接
       let cipher = null
       if (cred.e2eKey) {
@@ -190,7 +229,7 @@ export function apply(ctx, config = {}) {
           warn(`E2E 密钥无效,回退明文:${errMsg(err)}`)
         }
       }
-      const url = `${wsBase(gateway)}/dsh/agent?token=${encodeURIComponent(cred.token)}`
+      const url = `${wsBase(cred.gateway)}/dsh/agent?token=${encodeURIComponent(cred.token)}`
       const tunnel = new Tunnel({
         url,
         upstream,
@@ -228,6 +267,7 @@ export function apply(ctx, config = {}) {
         warn('设备 token 已失效或被吊销,回到扫码配对')
         removeToken()
         state.e2e = false
+        state.gateway = ''
         state.detail = '设备已解绑,请重新扫码配对'
         backoff = RECONNECT_MIN_MS
         continue
@@ -259,11 +299,9 @@ export function apply(ctx, config = {}) {
       json(res, 200, {
         phase: state.phase,
         deviceId: state.deviceId,
-        qrSvg: state.qrSvg,
-        payload: state.payload || '',
-        expiresAt: state.expiresAt,
         detail: state.detail,
-        gateway,
+        gateway: state.gateway, // 当前已连接/连接中的网关;配对阶段为空
+        pairs: state.pairs, // 配对阶段的各网关二维码与状态
         upstream,
         e2e: state.e2e, // 当前凭据是否携带 E2E 密钥
         // dsh 0.1.5 起隧道请求要带本机会话 cookie;false 说明 connection 服务还没接入
@@ -293,7 +331,7 @@ export function apply(ctx, config = {}) {
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/onebox-bridge', handler }))
   ctx.effect(() => {
     run().catch((err) => warn(`状态机异常退出:${errMsg(err)}`))
-    log(`已加载,页面 http://${ctx.webServer.host}:${ctx.webServer.port}/onebox-bridge`)
+    log(`已加载,页面 http://${ctx.webServer.host}:${ctx.webServer.port}/onebox-bridge,网关:${gateways.join(', ')}`)
     return () => {
       stopped = true
       for (const t of timers) clearTimeout(t)
@@ -301,6 +339,31 @@ export function apply(ctx, config = {}) {
       currentTunnel?.close('dropped')
     }
   })
+}
+
+/**
+ * 网关列表解析:ONEBOX_DSH_GATEWAYS(逗号分隔)> config.gateways
+ * > ONEBOX_DSH_GATEWAY / config.gateway(单值,等价于单元素数组)> 默认双部署。
+ * @param {{ gateway?: string, gateways?: string[] }} config
+ * @returns {string[]} 去尾斜杠、去重、非空
+ */
+function resolveGateways(config) {
+  const envList = process.env.ONEBOX_DSH_GATEWAYS
+  const envSingle = process.env.ONEBOX_DSH_GATEWAY
+  let list
+  if (envList) list = envList.split(',')
+  else if (envSingle) list = [envSingle]
+  else if (Array.isArray(config.gateways) && config.gateways.length) list = config.gateways
+  else if (config.gateway) list = [config.gateway]
+  else list = DEFAULT_GATEWAYS
+  return [...new Set(list.map((g) => trimSlash(String(g).trim())).filter(Boolean))]
+}
+
+/** 网关归类(页面标注用):domestic=国内版 App,overseas=海外版 App,custom=自建。 */
+function gatewayKind(gateway) {
+  if (gateway.includes('wanbaohe.com')) return 'domestic'
+  if (gateway.includes('oneboxable.com')) return 'overseas'
+  return 'custom'
 }
 
 function trimSlash(s) {
