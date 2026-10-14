@@ -21,7 +21,7 @@
 ```
 
 - 插件在 dsh web GUI 挂 `/onebox-bridge` 页面(自包含 HTML,无外部依赖),显示配对二维码与在线状态
-- 配对走 `POST /dsh/pair-sessions` → 本地生成 ≥128bit secret 编入 QR(`oneboxdsh://pair?v=1&g=…&p=…&s=…`)→ 2s 轮询 `GET /dsh/pair-sessions/:id/status?s=…`,App 扫码 claim 后取回设备 token
+- 配对走 `POST /dsh/pair-sessions` → 本地生成 ≥128bit secret 编入 QR(`oneboxdsh://pair?v=1&g=…&p=…&s=…`)→ 指数退避轮询 `GET /dsh/pair-sessions/:id/status?s=…`(1s 起步翻倍、上限 30s,429 时采纳 `Retry-After`),App 扫码 claim 后取回设备 token
 - 上线走出站 WSS `/dsh/agent?token=…`;隧道帧:`http`→ 本地 `POST /api/<method>` 回 `http-resp`;`ws-open`/`ws-frame`/`ws-close` 桥接本地 `/api/events.mux|host`
 - 控制 WS 断开 → 关闭全部本地桥接,指数退避重连(1s→30s);token 401(失效/被吊销)→ 删除本地 token,自动回到扫码配对态
 - **端到端加密**:配对密钥只通过二维码下发、不经过服务器;手机 ↔ 电脑全程 AES-256-GCM,中继服务器只转密文

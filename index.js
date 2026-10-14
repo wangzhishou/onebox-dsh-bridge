@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import QRCode from 'qrcode'
+import { PAIR_POLL_MIN_MS, nextPairPollMs } from './lib/backoff.js'
 import { createCipher } from './lib/e2e.js'
 import { createSessionCookie } from './lib/session-cookie.js'
 import { Tunnel } from './lib/tunnel.js'
@@ -20,7 +21,6 @@ export const inject = ['webServer']
 // 所以默认同时对两边各建一个配对会话、各出一张二维码;哪张先被认领,隧道就建到哪边。
 const DEFAULT_GATEWAYS = ['https://api.wanbaohe.com', 'https://api.oneboxable.com']
 const DEFAULT_UPSTREAM = '127.0.0.1:3080'
-const PAIR_POLL_MS = 2_000
 const PAIR_RETRY_MS = 3_000
 const RECONNECT_MIN_MS = 1_000
 const RECONNECT_MAX_MS = 30_000
@@ -105,13 +105,18 @@ export function apply(ctx, config = {}) {
     return data // { pairingId, expiresIn }
   }
 
-  /** @returns {Promise<{status:string, token?:string, deviceId?:string} | 'gone'>} */
+  /** @returns {Promise<{status:string, token?:string, deviceId?:string, retryAfter?:number} | 'gone'>} */
   async function pollPairStatus(gateway, pairingId, secret) {
     const resp = await fetch(
       `${gateway}/dsh/pair-sessions/${encodeURIComponent(pairingId)}/status?s=${encodeURIComponent(secret)}`,
       { signal: AbortSignal.timeout(10_000) },
     )
     if (resp.status === 410) return 'gone'
+    // 服务端每 IP 限流 (1 r/s): 采纳 Retry-After, 由调用方加大轮询间隔
+    if (resp.status === 429) {
+      const retryAfter = Number(resp.headers.get('retry-after')) || 0
+      return { status: 'rate_limited', retryAfter }
+    }
     if (!resp.ok) throw new Error(`查询配对状态失败 HTTP ${resp.status}`)
     return resp.json()
   }
@@ -183,19 +188,27 @@ export function apply(ctx, config = {}) {
       entry.detail = ''
       log(`[${gateway}] 配对会话 ${sess.pairingId} 已创建,等待扫码`)
 
+      // 轮询间隔: 新会话从 1s 起步 (扫码响应快), pending 后指数退避, 上限 30s
+      let pollMs = PAIR_POLL_MIN_MS
       while (!stopped && gen === pairGen) {
-        await sleep(PAIR_POLL_MS)
+        await sleep(pollMs)
         if (stopped || gen !== pairGen) return null
         let result
         try {
           result = await pollPairStatus(gateway, sess.pairingId, secret)
         } catch (err) {
           entry.detail = `轮询失败:${errMsg(err)}`
-          continue // 网络抖动不重建会话,下轮再试
+          continue // 网络抖动不重建会话,间隔不变,下轮再试
         }
         if (result === 'gone') {
           log(`[${gateway}] 配对会话已过期,重新生成`)
           break
+        }
+        if (result.status === 'rate_limited') {
+          // 服务端 429: 采纳 Retry-After 并继续退避
+          pollMs = nextPairPollMs(pollMs, result.retryAfter || 0)
+          entry.detail = `网关限流,轮询间隔已升至 ${Math.round(pollMs / 1000)}s`
+          continue
         }
         if (result.status === 'claimed' && result.token) {
           const cred = { token: result.token, deviceId: result.deviceId || '', e2eKey, gateway }
@@ -209,6 +222,11 @@ export function apply(ctx, config = {}) {
           state.pairs = []
           return cred
         }
+        // 仍是 pending: 退避翻倍
+        pollMs = nextPairPollMs(pollMs)
+        entry.detail = pollMs > PAIR_POLL_MIN_MS
+          ? `等待扫码中(轮询间隔 ${Math.round(pollMs / 1000)}s)`
+          : ''
       }
     }
     return null

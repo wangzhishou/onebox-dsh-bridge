@@ -3,6 +3,15 @@
 All notable changes to onebox-dsh-bridge are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/), versioning follows [SemVer](https://semver.org/).
 
+## [0.2.1] - 2026-10-14
+
+### Changed
+
+- **配对轮询改指数退避**: `GET /dsh/pair-sessions/:id/status` 从固定 2s 轮询改为
+  1s 起步、翻倍、上限 30s 的指数退避 (`lib/backoff.js`), 并采纳服务端 429 响应的
+  `Retry-After` 头。常驻等待配对时请求量降为原来的 ~1/15, 显著降低网关与按命令
+  计费的 Redis (Upstash) 开销。扫码响应速度不受影响 (新会话仍从 1s 起步)
+
 ## [0.2.0] - 2026-09-14
 
 ### Added

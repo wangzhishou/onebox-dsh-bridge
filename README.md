@@ -21,7 +21,7 @@ OneBox App ⇅ https://api.wanbaohe.com/dsh/* (CN relay) or https://api.oneboxab
 ```
 
 - Mounts a `/onebox-bridge` page in the dsh web GUI (self-contained HTML, zero external deps) showing the pairing QR code and online status
-- Pairing: `POST /dsh/pair-sessions` → a ≥128-bit secret is generated locally and encoded into the QR (`oneboxdsh://pair?v=1&g=…&p=…&s=…`) → polls `GET /dsh/pair-sessions/:id/status?s=…` every 2s; once the app scans and claims, the plugin receives its device token
+- Pairing: `POST /dsh/pair-sessions` → a ≥128-bit secret is generated locally and encoded into the QR (`oneboxdsh://pair?v=1&g=…&p=…&s=…`) → polls `GET /dsh/pair-sessions/:id/status?s=…` with exponential backoff (1s start, doubling, 30s cap, honors `Retry-After` on 429); once the app scans and claims, the plugin receives its device token
 - Goes online via outbound WSS `/dsh/agent?token=…`; tunnel frames: `http` → local `POST /api/<method>` answered by `http-resp`; `ws-open`/`ws-frame`/`ws-close` bridge the local `/api/events.mux|host` streams
 - Control WS drop → all local bridges closed, exponential-backoff reconnect (1s→30s); token 401 (revoked/expired) → local token deleted, back to scan-to-pair state
 - **End-to-end encryption**: the pairing key travels only inside the QR code, never through the server; all app ↔ computer traffic is AES-256-GCM encrypted — the relay forwards ciphertext only
